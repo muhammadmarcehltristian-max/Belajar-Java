@@ -15,12 +15,34 @@ public class AturKeuangan {
         LAINNYA
     }
 
+    // Jenis transaksi tabungan
+    enum JenisTabungan {
+        SETOR, // uang dari pemasukan dipindah ke tabungan (terkunci)
+        TARIK  // uang tabungan dikembalikan ke uang bebas (setelah buka kunci)
+    }
+
+    // Kode konfirmasi yang harus diketik user untuk membuka kunci tabungan
+    private static final String KODE_BUKA_KUNCI = "BUKA";
+
+    // Mengubah tanggal menjadi nama hari bahasa Indonesia (real-time dari sistem)
+    static String namaHari(LocalDate tanggal) {
+        switch (tanggal.getDayOfWeek()) {
+            case MONDAY:    return "Senin";
+            case TUESDAY:   return "Selasa";
+            case WEDNESDAY: return "Rabu";
+            case THURSDAY:  return "Kamis";
+            case FRIDAY:    return "Jumat";
+            case SATURDAY:  return "Sabtu";
+            default:        return "Minggu";
+        }
+    }
+
     // Class untuk merepresentasikan satu data kebutuhan
     static class Kebutuhan {
         Kategori kategori;
         String nama;       // nama makanan/minuman/barang, misal "Nasi Goreng", "Token Listrik"
         double harga;
-        String hari;       // diinput user (contoh: "Senin")
+        String hari;       // OTOMATIS dari sistem (sesuai hari real-time)
         LocalDate tanggal; // OTOMATIS dari sistem, tidak diinput user
 
         Kebutuhan(Kategori kategori, String nama, double harga, String hari, LocalDate tanggal) {
@@ -31,14 +53,11 @@ public class AturKeuangan {
             this.tanggal = tanggal;
         }
 
-        // Format untuk disimpan ke file (dipisah ";")
-        // Nama diganti karakter ";" (jika ada) supaya tidak merusak format CSV
         String toCsv() {
             String namaAman = nama.replace(";", ",");
             return kategori + ";" + namaAman + ";" + harga + ";" + hari + ";" + tanggal;
         }
 
-        // Membaca kembali 1 baris file menjadi objek Kebutuhan
         static Kebutuhan fromCsv(String baris) {
             String[] bagian = baris.split(";");
             Kategori k = Kategori.valueOf(bagian[0]);
@@ -69,13 +88,11 @@ public class AturKeuangan {
             this.tanggal = tanggal;
         }
 
-        // Format untuk disimpan ke file (dipisah ";")
         String toCsv() {
             String namaAman = nama.replace(";", ",");
             return namaAman + ";" + jumlah + ";" + tanggal;
         }
 
-        // Membaca kembali 1 baris file menjadi objek Pemasukan
         static Pemasukan fromCsv(String baris) {
             String[] bagian = baris.split(";");
             String nama = bagian[0];
@@ -87,21 +104,65 @@ public class AturKeuangan {
         @Override
         public String toString() {
             DateTimeFormatter fmt = DateTimeFormatter.ofPattern("dd-MM-yyyy");
-            return String.format("%-15s | Rp%,.0f | %s", nama, jumlah, tanggal.format(fmt));
+            // hari ditampilkan otomatis dari tanggal, jadi format file lama tetap kompatibel
+            return String.format("%-15s | Rp%,.0f | %-10s | %s",
+                    nama, jumlah, namaHari(tanggal), tanggal.format(fmt));
+        }
+    }
+
+    // Class untuk satu transaksi tabungan (setor / tarik)
+    static class Tabungan {
+        JenisTabungan jenis;
+        String keterangan; // tujuan menabung / alasan menarik
+        double jumlah;
+        String hari;       // OTOMATIS
+        LocalDate tanggal; // OTOMATIS
+
+        Tabungan(JenisTabungan jenis, String keterangan, double jumlah, String hari, LocalDate tanggal) {
+            this.jenis = jenis;
+            this.keterangan = keterangan;
+            this.jumlah = jumlah;
+            this.hari = hari;
+            this.tanggal = tanggal;
+        }
+
+        String toCsv() {
+            String ketAman = keterangan.replace(";", ",");
+            return jenis + ";" + ketAman + ";" + jumlah + ";" + hari + ";" + tanggal;
+        }
+
+        static Tabungan fromCsv(String baris) {
+            String[] bagian = baris.split(";");
+            JenisTabungan j = JenisTabungan.valueOf(bagian[0]);
+            String ket = bagian[1];
+            double jml = Double.parseDouble(bagian[2]);
+            String hari = bagian[3];
+            LocalDate tgl = LocalDate.parse(bagian[4]);
+            return new Tabungan(j, ket, jml, hari, tgl);
+        }
+
+        @Override
+        public String toString() {
+            DateTimeFormatter fmt = DateTimeFormatter.ofPattern("dd-MM-yyyy");
+            return String.format("%-6s | %-20s | Rp%,.0f | %-10s | %s",
+                    jenis, keterangan, jumlah, hari, tanggal.format(fmt));
         }
     }
 
     // Nama file penyimpanan data (dibuat di folder tempat program dijalankan)
     private static final String FILE_DATA = "data_kebutuhan.csv";
     private static final String FILE_SALDO = "data_pemasukan.csv";
+    private static final String FILE_TABUNGAN = "data_tabungan.csv";
 
     private static List<Kebutuhan> daftarKebutuhan = new ArrayList<>();
     private static List<Pemasukan> daftarPemasukan = new ArrayList<>();
+    private static List<Tabungan> daftarTabungan = new ArrayList<>();
     private static Scanner scanner = new Scanner(System.in);
 
     public static void main(String[] args) {
-        muatData();       // load data kebutuhan lama saat program dibuka
-        muatDataSaldo();  // load data pemasukan lama saat program dibuka
+        muatData();
+        muatDataSaldo();
+        muatDataTabungan();
 
         boolean lanjut = true;
         while (lanjut) {
@@ -109,27 +170,16 @@ public class AturKeuangan {
             int pilihan = bacaPilihan();
 
             switch (pilihan) {
-                case 1:
-                    tambahKebutuhan();
-                    break;
-                case 2:
-                    tampilkanSemuaKebutuhan();
-                    break;
-                case 3:
-                    lihatRingkasanMingguan();
-                    break;
-                case 4:
-                    hitungTotalPerKategori();
-                    break;
-                case 5:
-                    hitungTotalKeseluruhan();
-                    break;
-                case 6:
-                    tambahPemasukan();
-                    break;
-                case 7:
-                    ringkasanSaldo();
-                    break;
+                case 1:  tambahKebutuhan(); break;
+                case 2:  tampilkanSemuaKebutuhan(); break;
+                case 3:  lihatRingkasanMingguan(); break;
+                case 4:  hitungTotalPerKategori(); break;
+                case 5:  hitungTotalKeseluruhan(); break;
+                case 6:  tambahPemasukan(); break;
+                case 7:  ringkasanSaldo(); break;
+                case 8:  setorTabungan(); break;
+                case 9:  rincianTabungan(); break;
+                case 10: bukaKunciTabungan(); break;
                 case 0:
                     lanjut = false;
                     System.out.println("Data sudah tersimpan otomatis. Sampai jumpa!");
@@ -143,15 +193,21 @@ public class AturKeuangan {
     }
 
     private static void tampilkanMenu() {
+        LocalDate hariIni = LocalDate.now();
         System.out.println("\n=== APLIKASI ATUR KEUANGAN ===");
-        System.out.println("1. Tambah Kebutuhan");
-        System.out.println("2. Lihat Semua Kebutuhan");
-        System.out.println("3. Ringkasan Mingguan");
-        System.out.println("4. Total Per Kategori");
-        System.out.println("5. Total Keseluruhan Pengeluaran");
-        System.out.println("6. Tambah Uang Masuk (Saldo)");
-        System.out.println("7. Ringkasan Saldo (Uang Masuk, Pengeluaran, Sisa Uang)");
-        System.out.println("0. Keluar");
+        System.out.println("Hari ini: " + namaHari(hariIni) + ", "
+                + hariIni.format(DateTimeFormatter.ofPattern("dd-MM-yyyy")));
+        System.out.println("1.  Tambah Kebutuhan");
+        System.out.println("2.  Lihat Semua Kebutuhan");
+        System.out.println("3.  Ringkasan Mingguan");
+        System.out.println("4.  Total Per Kategori");
+        System.out.println("5.  Total Keseluruhan Pengeluaran");
+        System.out.println("6.  Tambah Uang Masuk (Saldo)");
+        System.out.println("7.  Ringkasan Saldo (Uang Masuk, Pengeluaran, Tabungan, Sisa Uang)");
+        System.out.println("8.  Tabung Uang (pisahkan dari pemasukan, terkunci)");
+        System.out.println("9.  Rincian Tabungan");
+        System.out.println("10. Ambil Tabungan (buka kunci)");
+        System.out.println("0.  Keluar");
         System.out.print("Pilih menu: ");
     }
 
@@ -186,7 +242,6 @@ public class AturKeuangan {
 
         Kategori kategoriTerpilih = semuaKategori[pilihanKategori - 1];
 
-        // Nama makanan/minuman/barang, biar catatan lebih terperinci
         System.out.print("Masukkan nama (contoh: Nasi Goreng, Token Listrik, Bensin Pertalite): ");
         String nama = scanner.nextLine().trim();
         if (nama.isEmpty()) {
@@ -201,15 +256,29 @@ public class AturKeuangan {
             System.out.println("Harga tidak valid.");
             return;
         }
+        if (harga <= 0) {
+            System.out.println("Harga harus lebih dari 0.");
+            return;
+        }
 
-        System.out.print("Masukkan hari (contoh: Senin): ");
-        String hari = scanner.nextLine().trim();
+        // Uang tabungan terkunci: pengeluaran tidak boleh memakai uang tabungan
+        double saldoTabungan = hitungSaldoTabungan();
+        if (saldoTabungan > 0 && harga > hitungSisaUangBebas()) {
+            System.out.printf("Ditolak! Uang bebas hanya Rp%,.0f, sedangkan uang tabungan (Rp%,.0f) terkunci.%n",
+                    hitungSisaUangBebas(), saldoTabungan);
+            System.out.println("Gunakan menu 10 jika memang ingin membuka tabungan.");
+            return;
+        }
 
-        Kebutuhan baru = new Kebutuhan(kategoriTerpilih, nama, harga, hari, LocalDate.now());
+        // Hari & tanggal OTOMATIS sesuai real-time sistem
+        LocalDate hariIni = LocalDate.now();
+        String hari = namaHari(hariIni);
+
+        Kebutuhan baru = new Kebutuhan(kategoriTerpilih, nama, harga, hari, hariIni);
         daftarKebutuhan.add(baru);
-        simpanSatuData(baru); // langsung ditulis ke file, tidak menunggu program ditutup
+        simpanSatuData(baru);
 
-        System.out.println("Tersimpan! (tanggal otomatis: " + baru.tanggal + ")");
+        System.out.println("Tersimpan! (hari & tanggal otomatis: " + baru.hari + ", " + baru.tanggal + ")");
     }
 
     // ==========================================================
@@ -231,12 +300,17 @@ public class AturKeuangan {
             System.out.println("Jumlah tidak valid.");
             return;
         }
+        if (jumlah <= 0) {
+            System.out.println("Jumlah harus lebih dari 0.");
+            return;
+        }
 
         Pemasukan baru = new Pemasukan(nama, jumlah, LocalDate.now());
         daftarPemasukan.add(baru);
-        simpanSatuPemasukan(baru); // langsung ditulis ke file
+        simpanSatuPemasukan(baru);
 
-        System.out.println("Uang masuk tersimpan! (tanggal otomatis: " + baru.tanggal + ")");
+        System.out.println("Uang masuk tersimpan! (hari & tanggal otomatis: "
+                + namaHari(baru.tanggal) + ", " + baru.tanggal + ")");
     }
 
     private static double hitungTotalPemasukan() {
@@ -255,10 +329,29 @@ public class AturKeuangan {
         return total;
     }
 
+    // Saldo tabungan = total setor - total tarik
+    private static double hitungSaldoTabungan() {
+        double total = 0;
+        for (Tabungan t : daftarTabungan) {
+            if (t.jenis == JenisTabungan.SETOR) {
+                total += t.jumlah;
+            } else {
+                total -= t.jumlah;
+            }
+        }
+        return total;
+    }
+
+    // Uang yang BOLEH dipakai = pemasukan - pengeluaran - tabungan (yang terkunci)
+    private static double hitungSisaUangBebas() {
+        return hitungTotalPemasukan() - hitungTotalPengeluaran() - hitungSaldoTabungan();
+    }
+
     private static void ringkasanSaldo() {
         double totalMasuk = hitungTotalPemasukan();
         double totalKeluar = hitungTotalPengeluaran();
-        double sisa = totalMasuk - totalKeluar;
+        double tabungan = hitungSaldoTabungan();
+        double sisaBebas = hitungSisaUangBebas();
 
         System.out.println("\n=== RINGKASAN SALDO ===");
         if (daftarPemasukan.isEmpty()) {
@@ -271,13 +364,147 @@ public class AturKeuangan {
         }
 
         System.out.println();
-        System.out.printf("Total Uang Masuk      : Rp%,.0f%n", totalMasuk);
-        System.out.printf("Total Pengeluaran      : Rp%,.0f%n", totalKeluar);
-        System.out.printf("Sisa Uang              : Rp%,.0f%n", sisa);
+        System.out.printf("Total Uang Masuk              : Rp%,.0f%n", totalMasuk);
+        System.out.printf("Total Pengeluaran             : Rp%,.0f%n", totalKeluar);
+        System.out.printf("Uang Tabungan (terkunci)      : Rp%,.0f%n", tabungan);
+        System.out.printf("Sisa Uang Bebas (bisa dipakai): Rp%,.0f%n", sisaBebas);
 
-        if (sisa < 0) {
-            System.out.println("Perhatian: pengeluaran sudah melebihi uang masuk!");
+        if (sisaBebas < 0) {
+            System.out.println("Perhatian: pengeluaran sudah melebihi uang bebas!");
         }
+    }
+
+    // ==========================================================
+    // BAGIAN TABUNGAN (uang dipisahkan & terkunci)
+    // ==========================================================
+
+    private static void setorTabungan() {
+        double sisaBebas = hitungSisaUangBebas();
+        System.out.printf("%nUang bebas saat ini: Rp%,.0f%n", sisaBebas);
+        if (sisaBebas <= 0) {
+            System.out.println("Tidak ada uang bebas yang bisa ditabung.");
+            return;
+        }
+
+        System.out.print("Masukkan tujuan menabung (contoh: Dana Darurat, Beli Laptop): ");
+        String ket = scanner.nextLine().trim();
+        if (ket.isEmpty()) {
+            ket = "-";
+        }
+
+        System.out.print("Masukkan jumlah yang ingin ditabung: ");
+        double jumlah;
+        try {
+            jumlah = Double.parseDouble(scanner.nextLine().trim());
+        } catch (NumberFormatException e) {
+            System.out.println("Jumlah tidak valid.");
+            return;
+        }
+        if (jumlah <= 0) {
+            System.out.println("Jumlah harus lebih dari 0.");
+            return;
+        }
+        if (jumlah > sisaBebas) {
+            System.out.printf("Jumlah melebihi uang bebas (Rp%,.0f).%n", sisaBebas);
+            return;
+        }
+
+        LocalDate hariIni = LocalDate.now();
+        Tabungan t = new Tabungan(JenisTabungan.SETOR, ket, jumlah, namaHari(hariIni), hariIni);
+        daftarTabungan.add(t);
+        simpanSatuTabungan(t);
+
+        System.out.printf("Berhasil menabung Rp%,.0f. Uang ini terkunci dan tidak ikut dihitung sebagai uang bebas.%n", jumlah);
+        System.out.printf("Total tabungan sekarang: Rp%,.0f%n", hitungSaldoTabungan());
+    }
+
+    private static void rincianTabungan() {
+        if (daftarTabungan.isEmpty()) {
+            System.out.println("\nBelum ada data tabungan.");
+            return;
+        }
+
+        double totalSetor = 0;
+        double totalTarik = 0;
+
+        System.out.println("\n=== RINCIAN TABUNGAN ===");
+        System.out.printf("%-3s %-6s | %-20s | %-10s | %-10s | %s%n",
+                "No", "Jenis", "Keterangan", "Jumlah", "Hari", "Tanggal");
+        for (int i = 0; i < daftarTabungan.size(); i++) {
+            Tabungan t = daftarTabungan.get(i);
+            System.out.println((i + 1) + ". " + t);
+            if (t.jenis == JenisTabungan.SETOR) {
+                totalSetor += t.jumlah;
+            } else {
+                totalTarik += t.jumlah;
+            }
+        }
+
+        // Rincian total per tujuan menabung (setor dikurangi tarik)
+        Map<String, Double> perTujuan = new TreeMap<>();
+        for (Tabungan t : daftarTabungan) {
+            double nilai = (t.jenis == JenisTabungan.SETOR) ? t.jumlah : -t.jumlah;
+            perTujuan.merge(t.keterangan, nilai, Double::sum);
+        }
+
+        System.out.println("\nRincian per tujuan:");
+        for (Map.Entry<String, Double> e : perTujuan.entrySet()) {
+            System.out.printf("- %-20s : Rp%,.0f%n", e.getKey(), e.getValue());
+        }
+
+        System.out.println();
+        System.out.printf("Total Setor                : Rp%,.0f%n", totalSetor);
+        System.out.printf("Total Tarik                : Rp%,.0f%n", totalTarik);
+        System.out.printf("Saldo Tabungan (terkunci)  : Rp%,.0f%n", totalSetor - totalTarik);
+    }
+
+    // Tabungan hanya bisa diambil jika user mengetik kode konfirmasi
+    private static void bukaKunciTabungan() {
+        double saldo = hitungSaldoTabungan();
+        System.out.printf("%nSaldo tabungan terkunci: Rp%,.0f%n", saldo);
+        if (saldo <= 0) {
+            System.out.println("Tidak ada uang di tabungan.");
+            return;
+        }
+
+        System.out.println("Tabungan dikunci supaya tidak terpakai sembarangan.");
+        System.out.print("Ketik \"" + KODE_BUKA_KUNCI + "\" untuk membuka kunci (selain itu = batal): ");
+        String kode = scanner.nextLine().trim();
+        if (!kode.equals(KODE_BUKA_KUNCI)) {
+            System.out.println("Dibatalkan. Tabungan tetap terkunci.");
+            return;
+        }
+
+        System.out.print("Masukkan alasan pengambilan: ");
+        String alasan = scanner.nextLine().trim();
+        if (alasan.isEmpty()) {
+            alasan = "-";
+        }
+
+        System.out.print("Masukkan jumlah yang diambil: ");
+        double jumlah;
+        try {
+            jumlah = Double.parseDouble(scanner.nextLine().trim());
+        } catch (NumberFormatException e) {
+            System.out.println("Jumlah tidak valid.");
+            return;
+        }
+        if (jumlah <= 0) {
+            System.out.println("Jumlah harus lebih dari 0.");
+            return;
+        }
+        if (jumlah > saldo) {
+            System.out.printf("Jumlah melebihi saldo tabungan (Rp%,.0f).%n", saldo);
+            return;
+        }
+
+        LocalDate hariIni = LocalDate.now();
+        Tabungan t = new Tabungan(JenisTabungan.TARIK, alasan, jumlah, namaHari(hariIni), hariIni);
+        daftarTabungan.add(t);
+        simpanSatuTabungan(t);
+
+        System.out.printf("Berhasil mengambil Rp%,.0f dari tabungan. Uang kembali menjadi uang bebas.%n", jumlah);
+        System.out.printf("Sisa tabungan: Rp%,.0f%n", hitungSaldoTabungan());
     }
 
     private static void tampilkanSemuaKebutuhan() {
@@ -319,12 +546,6 @@ public class AturKeuangan {
 
     // ==========================================================
     // BAGIAN RINGKASAN MINGGUAN
-    // Minggu dihitung Senin s.d. Minggu. Minggu yang sudah lewat
-    // ditampilkan terpangkas ("Minggu N total = ..."), sedangkan
-    // minggu yang masih berjalan ditampilkan detailnya langsung.
-    // Ketik nomor minggu untuk membuka/menutup detailnya
-    // (pengganti tombol panah, karena console Java standar tidak
-    // bisa mendeteksi tombol panah tanpa library tambahan seperti JLine).
     // ==========================================================
 
     private static LocalDate awalMinggu(LocalDate tanggal) {
@@ -341,7 +562,6 @@ public class AturKeuangan {
             return;
         }
 
-        // Kelompokkan semua data berdasarkan minggu (kunci = tanggal Senin di minggu itu)
         TreeMap<LocalDate, List<Kebutuhan>> perMinggu = new TreeMap<>();
         for (Kebutuhan keb : daftarKebutuhan) {
             LocalDate kunciMinggu = awalMinggu(keb.tanggal);
@@ -367,11 +587,9 @@ public class AturKeuangan {
             String label = "Minggu " + (i + 1);
 
             if (sudahSelesai) {
-                // Minggu yang sudah lewat -> tampil terpangkas
                 System.out.printf("%d. [>] %s (%s - %s) total = Rp%,.0f%n",
                         i + 1, label, mulai.format(fmtPendek), akhir.format(fmtPendek), totalMinggu);
             } else {
-                // Minggu yang masih berjalan -> tampil terbuka + detailnya
                 System.out.printf("%d. [v] %s (%s - %s) [BERJALAN] total sementara = Rp%,.0f%n",
                         i + 1, label, mulai.format(fmtPendek), akhir.format(fmtPendek), totalMinggu);
                 for (Kebutuhan keb : isiMinggu) {
@@ -409,14 +627,12 @@ public class AturKeuangan {
 
     // ==========================================================
     // BAGIAN PENYIMPANAN FILE
-    // Supaya data tidak hilang tiap program ditutup, dan program
-    // bisa dipakai terus-menerus setiap hari.
     // ==========================================================
 
     private static void muatData() {
         File file = new File(FILE_DATA);
         if (!file.exists()) {
-            return; // pertama kali dijalankan, belum ada data
+            return;
         }
 
         try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
@@ -446,7 +662,7 @@ public class AturKeuangan {
     private static void muatDataSaldo() {
         File file = new File(FILE_SALDO);
         if (!file.exists()) {
-            return; // pertama kali dijalankan, belum ada data
+            return;
         }
 
         try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
@@ -470,6 +686,36 @@ public class AturKeuangan {
             writer.newLine();
         } catch (IOException e) {
             System.out.println("Gagal menyimpan data pemasukan: " + e.getMessage());
+        }
+    }
+
+    private static void muatDataTabungan() {
+        File file = new File(FILE_TABUNGAN);
+        if (!file.exists()) {
+            return;
+        }
+
+        try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
+            String baris;
+            while ((baris = reader.readLine()) != null) {
+                if (baris.trim().isEmpty()) continue;
+                try {
+                    daftarTabungan.add(Tabungan.fromCsv(baris));
+                } catch (Exception e) {
+                    System.out.println("Baris data tabungan rusak dilewati: " + baris);
+                }
+            }
+        } catch (IOException e) {
+            System.out.println("Gagal membaca data tabungan lama: " + e.getMessage());
+        }
+    }
+
+    private static void simpanSatuTabungan(Tabungan t) {
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(FILE_TABUNGAN, true))) {
+            writer.write(t.toCsv());
+            writer.newLine();
+        } catch (IOException e) {
+            System.out.println("Gagal menyimpan data tabungan: " + e.getMessage());
         }
     }
 }
